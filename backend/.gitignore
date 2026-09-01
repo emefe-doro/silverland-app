@@ -1,0 +1,16 @@
+# Env
+.env
+*.local
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+*.log

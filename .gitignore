@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+dist/
+out/
+
+# Env / secrets (never commit)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production
+!.env.example
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+
+# Misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+.eslintcache
+.vercel
+.netlify

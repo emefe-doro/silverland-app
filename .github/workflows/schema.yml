@@ -1,0 +1,31 @@
+# Apply the Prisma schema to the database when code lands on main.
+# Only runs if the DATABASE_URL repo secret is configured.
+name: Apply DB Schema
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  push-schema:
+    if: ${{ secrets.DATABASE_URL != '' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Push schema
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma db push

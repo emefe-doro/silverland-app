@@ -1,0 +1,392 @@
+// =============================================================================
+// SILVERLAND ZONE - TEDO HOUSING ESTATE ACCESS CONTROL SYSTEM
+// Prisma schema (PostgreSQL). Also compatible with Supabase Postgres.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------- Enums ----------------------------
+
+enum Role {
+  SUPER_ADMIN
+  ESTATE_MANAGEMENT
+  SECURITY_OFFICER
+  RESIDENT
+}
+
+enum PropertyStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ResidentType {
+  OWNER
+  TENANT
+  LANDLORD
+  PERMANENT
+}
+
+enum ResidentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ResidentSource {
+  MANUAL
+  NOTEBOOK_IMPORT
+}
+
+enum VisitorType {
+  GUEST
+  FAMILY
+  DELIVERY
+  SERVICE
+  CONTRACTOR
+  OTHER
+}
+
+enum VisitorStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+  EXPECTED
+  UNEXPECTED
+  EXPIRED
+}
+
+enum PassStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+  REVOKED
+}
+
+enum DispatchStatus {
+  PENDING
+  APPROVED
+  DENIED
+  INSIDE
+  EXITED
+  EXPIRED
+}
+
+enum PersonType {
+  VISITOR
+  DISPATCH
+  VEHICLE
+}
+
+enum AccessAction {
+  ENTRY
+  EXIT
+  DENIED
+}
+
+enum AccessStatus {
+  INSIDE
+  EXITED
+  DENIED
+}
+
+enum NotificationType {
+  VISITOR_ARRIVAL
+  VISITOR_APPROVAL
+  VISITOR_DENIED
+  VISITOR_CHECKOUT
+  DISPATCH_ARRIVAL
+  SECURITY_ALERT
+}
+
+// ---------------------------- Core: Users & Staff ----------------------------
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  phone         String?
+  passwordHash  String
+  name          String
+  role          Role
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  resident         Resident?
+  securityOfficer  SecurityOfficer?
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  approvedVisitors Visitor[]        @relation("ApprovedBy")
+  registeredVisitors Visitor[]      @relation("RegisteredBy")
+  registeredDispatch DispatchRider[] @relation("DispatchRegistered")
+  confirmedDispatch DispatchRider[]  @relation("DispatchConfirmed")
+
+  @@index([role])
+}
+
+model SecurityOfficer {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String?  @unique @db.Uuid
+  badgeNumber   String   @unique
+  station       String?
+  name          String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  user        User?         @relation(fields: [userId], references: [id])
+  accessLogs  AccessLog[]
+
+  @@index([isActive])
+}
+
+// ---------------------------- Properties & Residents ----------------------------
+
+model Property {
+  id           String         @id @default(uuid()) @db.Uuid
+  unitNumber   String         @unique
+  block        String?
+  propertyType String?        // Apartment / Maisonette / Duplex / Office
+  status       PropertyStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+
+  residents     Resident[]
+  accessLogs    AccessLog[]
+
+  @@index([block])
+}
+
+model Resident {
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String?        @unique @db.Uuid
+  propertyId     String?        @db.Uuid
+  firstName      String
+  lastName       String
+  phone          String?
+  email          String?
+  propertyStatus ResidentStatus @default(ACTIVE)
+  residentType   ResidentType   @default(OWNER)
+  photoUrl       String?
+  source         ResidentSource @default(MANUAL)
+  verified       Boolean        @default(false)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user             User?              @relation(fields: [userId], references: [id])
+  property         Property?          @relation(fields: [propertyId], references: [id])
+  visitors         Visitor[]          @relation("ResidentVisited")
+  dispatchRiders   DispatchRider[]
+  vehicles         Vehicle[]
+  accessLogs       AccessLog[]
+
+  @@index([firstName, lastName])
+  @@index([phone])
+  @@index([propertyId])
+}
+
+// ---------------------------- Vehicles ----------------------------
+
+model Vehicle {
+  id          String   @id @default(uuid()) @db.Uuid
+  residentId  String?  @db.Uuid
+  plateNumber String
+  make        String?
+  color       String?
+  type        String?  // Car / SUV / Truck / Bike
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  resident   Resident?    @relation(fields: [residentId], references: [id])
+  accessLogs AccessLog[]
+
+  @@index([plateNumber])
+}
+
+// ---------------------------- Visitors & Passes ----------------------------
+
+model Visitor {
+  id               String       @id @default(uuid()) @db.Uuid
+  residentId       String?      @db.Uuid
+  fullName         String
+  phone            String?
+  visitorType      VisitorType  @default(GUEST)
+  purpose          String?
+  expectedDate     DateTime?
+  expectedArrival  DateTime?
+  expectedDeparture DateTime?
+  vehicleType      String?
+  vehiclePlate     String?
+  photoUrl         String?
+  status           VisitorStatus @default(UNEXPECTED)
+  registeredById   String?      @db.Uuid
+  approvedById     String?      @db.Uuid
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  resident       Resident?        @relation("ResidentVisited", fields: [residentId], references: [id])
+  registeredBy   User?            @relation("RegisteredBy", fields: [registeredById], references: [id])
+  approvedBy     User?            @relation("ApprovedBy", fields: [approvedById], references: [id])
+  passes         VisitorPass[]
+  accessLogs     AccessLog[]
+
+  @@index([fullName])
+  @@index([phone])
+  @@index([residentId])
+}
+
+model VisitorPass {
+  id           String     @id @default(uuid()) @db.Uuid
+  visitorId    String     @db.Uuid
+  token        String     @unique
+  qrContent    String
+  issuedAt     DateTime   @default(now())
+  expiresAt    DateTime?
+  status       PassStatus @default(ACTIVE)
+  maxUses      Int        @default(1)
+  usesCount    Int        @default(0)
+  revokedAt    DateTime?
+  revokedById  String?    @db.Uuid
+  createdAt    DateTime   @default(now())
+
+  visitor Visitor? @relation(fields: [visitorId], references: [id])
+
+  @@index([token])
+  @@index([visitorId])
+}
+
+// ---------------------------- Dispatch Riders ----------------------------
+
+model DispatchRider {
+  id              String         @id @default(uuid()) @db.Uuid
+  residentId      String?        @db.Uuid
+  riderName       String
+  riderPhone      String?
+  company         String?
+  orderReference  String?
+  deliveryUnit    String?
+  bikeNumber      String?
+  plateNumber     String?
+  photoUrl        String?
+  notes           String?
+  status          DispatchStatus @default(PENDING)
+  passToken       String?        @unique
+  expiresAt       DateTime?
+  registeredById  String?        @db.Uuid
+  confirmedById   String?        @db.Uuid
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  resident       Resident?   @relation(fields: [residentId], references: [id])
+  registeredBy   User?       @relation("DispatchRegistered", fields: [registeredById], references: [id])
+  confirmedBy    User?       @relation("DispatchConfirmed", fields: [confirmedById], references: [id])
+  accessLogs     AccessLog[]
+
+  @@index([riderName])
+  @@index([residentId])
+}
+
+// ---------------------------- Access Logs ----------------------------
+
+model AccessLog {
+  id                String        @id @default(uuid()) @db.Uuid
+  personType        PersonType
+  visitorId         String?       @db.Uuid
+  dispatchId        String?       @db.Uuid
+  residentId        String?       @db.Uuid
+  propertyId        String?       @db.Uuid
+  vehicleId         String?       @db.Uuid
+  vehiclePlate      String?
+  securityOfficerId String?       @db.Uuid
+  action            AccessAction
+  status            AccessStatus
+  token             String?       // scanned pass token, if any
+  entryAt           DateTime      @default(now())
+  exitAt            DateTime?
+  durationSeconds   Int?
+  reason            String?       // for DENIED
+  notes             String?
+  source            String        @default("SCAN")
+  deviceInfo        Json?
+  createdAt         DateTime      @default(now())
+
+  visitor         Visitor?         @relation(fields: [visitorId], references: [id])
+  dispatch        DispatchRider?   @relation(fields: [dispatchId], references: [id])
+  resident        Resident?        @relation(fields: [residentId], references: [id])
+  property        Property?        @relation(fields: [propertyId], references: [id])
+  vehicle         Vehicle?         @relation(fields: [vehicleId], references: [id])
+  securityOfficer SecurityOfficer? @relation(fields: [securityOfficerId], references: [id])
+
+  @@index([personType])
+  @@index([action])
+  @@index([entryAt])
+  @@index([visitorId])
+  @@index([dispatchId])
+  @@index([durationSeconds])
+}
+
+// ---------------------------- Notifications ----------------------------
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  title     String
+  message   String
+  actorName String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user      User?      @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+}
+
+// ---------------------------- Audit Logs ----------------------------
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  actorName   String?
+  actorRole   String?
+  action      String
+  entityType  String?
+  entityId    String?
+  summary     String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user    User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ---------------------------- Estate Settings (singleton) ----------------------------
+
+model EstateSettings {
+  id                                Int     @id @default(1)
+  estateName                        String  @default("Silverland Zone")
+  estateSubtitle                    String  @default("Tedo Housing Estate")
+  visitorPassValidityHours          Int     @default(24)
+  dispatchValidityMinutes           Int     @default(45)
+  maxVisitorDurationHours           Int     @default(12)
+  residentsMustApproveVisitors      Boolean @default(true)
+  dispatchRequiresResidentConfirmation Boolean @default(true)
+  securityOfficerCanEditResidents   Boolean @default(false)
+  securityOfficerCanOverrideDenied  Boolean @default(false)
+  allowUnexpectedVisitors           Boolean @default(true)
+  updatedAt                         DateTime @updatedAt
+}

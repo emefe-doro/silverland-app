@@ -1,0 +1,24 @@
+# Silverland backend — Render Blueprint
+# Configure synced env vars (DATABASE_URL, AUTH_SECRET) in the dashboard.
+# After deploy, add the Netlify frontend URL to CORS_ORIGINS.
+services:
+  - type: web
+    name: silverland-backend
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        value: "http://localhost:3000"
+      - key: ACCESS_TOKEN_EXPIRE_SECONDS
+        value: "28800"

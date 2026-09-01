@@ -1,0 +1,23 @@
+# Build
+/.next/
+/out/
+
+# Dependencies
+/node_modules/
+
+# Database
+*.db
+*.db-journal
+
+# Env
+.env
+.env.local
+.env.production
+!.env.example
+
+# Misc
+.DS_Store
+*.pem
+npm-debug.log*
+*.tsbuildinfo
+.eslintcache
