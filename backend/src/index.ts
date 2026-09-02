@@ -28,10 +28,12 @@ import resident from "./routes/resident";
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
 
-const origins = (process.env.CORS_ORIGINS || "http://localhost:3000")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Reflect the requesting origin (bearer-token auth, no cookies → CSRF-safe).
+// Optionally restrict later by setting CORS_ORIGINS to a comma-separated list.
+const origins =
+  process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.trim()
+    ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
+    : true;
 
 app.use(cors({ origin: origins, allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json({ limit: "2mb" }));
