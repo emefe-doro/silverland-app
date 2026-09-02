@@ -28,6 +28,10 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
   if (err?.name === "ZodError") {
     return res.status(400).json({ error: err.issues?.[0]?.message ?? "Invalid input." });
   }
+  if (err?.name === "PrismaClientInitializationError" || err?.name === "PrismaClientKnownRequestError" || err?.name === "PrismaClientUnknownRequestError" || err?.code === "P1001" || err?.code === "P1000") {
+    console.error("DB ERROR:", err.message);
+    return res.status(500).json({ error: `DB_ERROR: ${err.message} (${err.code ?? ""})` });
+  }
   console.error(err);
   return res.status(500).json({ error: "Internal server error." });
 }
