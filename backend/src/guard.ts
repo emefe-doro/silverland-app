@@ -32,8 +32,8 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
     console.error("DB ERROR:", err.message);
     return res.status(500).json({ error: `DB_ERROR: ${err.message} (${err.code ?? ""})` });
   }
-  console.error(err);
-  return res.status(500).json({ error: "Internal server error." });
+  console.error("UNHANDLED ERROR:", err);
+  return res.status(500).json({ error: `ERR_DEBUG: ${err?.name}: ${err?.message}` });
 }
 
 // Wrap an async route handler to forward errors.
