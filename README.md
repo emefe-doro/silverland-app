@@ -5,29 +5,30 @@ Riders, Contractors and Security Officers**, replacing the estate's manual noteb
 
 Brand: **SILVERLAND ZONE** / **TEDO HOUSING ESTATE** (blue & white professional theme).
 
-> **Structure:** The app is split into two tiers —
-> a **backend API service** (`backend/`) and a **Next.js frontend** (`frontend/`) that calls it.
+> **Structure:** The app is structured into three cleanly separated applications powered by a unified **backend API service**:
+> 1. **adminweb** — Desktop/responsive Web App for estate managers & super admins.
+> 2. **resident-mobile** — Dedicated Mobile App for residents to generate visitor and self-exit/entry gate codes.
+> 3. **officer-mobile** — Dedicated Mobile App for security officers at the gate to confirm & verify codes.
 
 ---
 
-## Architecture (two-tier)
+## Architecture (Decoupled 3-Tier Multi-App)
 
 ```
-silverlandApp/
+silverland-app/
   backend/            Express + TypeScript + Prisma REST API (runs on :4000)
-    prisma/           schema.prisma, seed.ts, silverland_schema.sql
-    src/              db, auth(JWT), middleware(RBAC), gate-logic, routes/*
-    .env              DATABASE_URL, AUTH_SECRET, CORS_ORIGINS, PORT
-  frontend/           Next.js 15 (App Router) + Tailwind v4 SPA-style UI (runs on :3000)
-    src/app/          pages (no API routes — those live in backend)
-    src/lib/          client.ts (bearer-token fetch), auth.ts, constants, utils
-    .env.local        NEXT_PUBLIC_API_URL=http://localhost:4000
+    prisma/           schema.prisma, seed.ts
+    src/              db, auth(JWT), gate-logic, routes/* (tokens, gate, resident, etc.)
+  adminweb/           Admin Web App (Next.js 15, runs on :3000)
+    src/app/          Dashboard, Gate Passes, Visitors, Residents, Vehicles, Logs, Reports, Settings
+  resident-mobile/    Resident Mobile App (Next.js 15 PWA, runs on :3001)
+    src/app/          Visitor Code Generator, Self Gate Pass (Exit/Entry), Active Passes, WhatsApp Share
+  officer-mobile/     Officer Mobile Terminal (Next.js 15 PWA, runs on :3002)
+    src/app/          Gate Code Terminal, Numeric Keypad, Camera QR Scan, Grant/Deny Access, Shift Counters
   README.md
 ```
 
-**Auth model:** the backend issues a signed **JWT** on login (returned in the body). The frontend
-stores it in `localStorage` and sends it as `Authorization: Bearer <token>` on every request.
-CORS is configured so `:3000` can call `:4000`.
+**Auth model:** the backend issues a signed **JWT** on login (returned in the body). Each client stores its token in `localStorage` and sends it as `Authorization: Bearer <token>` on requests. CORS is configured to accept requests from all three applications.
 
 ---
 

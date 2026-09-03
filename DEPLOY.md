@@ -58,37 +58,62 @@ Option B — **Manual Web Service** (recommended):
 
 ---
 
-## 3) Deploy the frontend to Netlify
+## 3) Deploy the frontends to Netlify (or run live)
 
-1. Netlify → *Add new site → Import an existing project* → connect your GitHub repo.
+Because the platform is now split into three distinct apps, you can deploy each as a Netlify site from the same GitHub repository:
+
+### Site A: Admin Web App (`adminweb`)
+1. Netlify → *Add new site → Import an existing project* → select repo.
 2. **Build settings:**
-   - **Base directory:** `frontend`
+   - **Base directory:** `adminweb`
    - **Build command:** `npm run build`
    - **Publish directory:** `.next`
-   - *(The included `frontend/netlify.toml` sets these too; Netlify auto-detects Next.js.)*
-3. **Environment variables** (must be set BEFORE the build because `NEXT_PUBLIC_*` is inlined at build time):
-   - `NEXT_PUBLIC_API_URL` = `https://silverland-backend-xxxx.onrender.com`
+3. **Environment variables:**
+   - `NEXT_PUBLIC_API_URL` = your Render backend URL (e.g. `https://silverland-backend-xxxx.onrender.com`)
    - `NEXT_PUBLIC_APP_NAME` = `Silverland Zone`
    - `NEXT_PUBLIC_ESTATE_SUBTITLE` = `Tedo Housing Estate`
-4. Deploy. Copy the site URL — `https://<your-site>.netlify.app`.
+
+### Site B: Resident Mobile App (`resident-mobile`)
+1. Netlify → *Add new site → Import an existing project* → select repo.
+2. **Build settings:**
+   - **Base directory:** `resident-mobile`
+   - **Build command:** `npm run build`
+   - **Publish directory:** `.next`
+3. **Environment variables:**
+   - `NEXT_PUBLIC_API_URL` = your Render backend URL
+
+### Site C: Officer Mobile Terminal (`officer-mobile`)
+1. Netlify → *Add new site → Import an existing project* → select repo.
+2. **Build settings:**
+   - **Base directory:** `officer-mobile`
+   - **Build command:** `npm run build`
+   - **Publish directory:** `.next`
+3. **Environment variables:**
+   - `NEXT_PUBLIC_API_URL` = your Render backend URL
 
 ---
 
-## 4) Connect the two
+## 4) Connect CORS on Render
 
-Update the backend's `CORS_ORIGINS` to the **Netlify** URL and redeploy the backend:
+Update the backend's `CORS_ORIGINS` in the Render dashboard to include your deployed Netlify URLs (comma-separated):
 ```
-CORS_ORIGINS=https://<your-site>.netlify.app
+CORS_ORIGINS=https://admin.silverland.ng,https://resident.silverland.ng,https://officer.silverland.ng
 ```
-(Backend env var change → trigger a Render redeploy.)
+*(Or leave `CORS_ORIGINS` empty so it reflects the requesting origin automatically).*
 
 ---
 
-## 5) Verify
+## 5) Running Locally with Live Backend
 
-1. Open `https://<your-site>.netlify.app` → you should see the login page (HTTPS).
-2. Log in with a demo account (`officer.ade@silverland.ng` / `Officer@123`), navigate to **Gate Control → SCAN QR**.
-3. On the phone, *browser menu → Add to Home screen* (PWA install), then use **SCAN QR** — the camera now works because it's HTTPS.
+You can also run the resident and officer apps on your machine/phone immediately while pointing them to your live Render backend:
+
+In `resident-mobile/.env.local` and `officer-mobile/.env.local`:
+```
+NEXT_PUBLIC_API_URL=https://your-backend.onrender.com
+```
+Then start the apps:
+- `npm --prefix resident-mobile run dev` (Port 3001)
+- `npm --prefix officer-mobile run dev` (Port 3002)
 
 ---
 

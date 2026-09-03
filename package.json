@@ -1,0 +1,16 @@
+{
+  "name": "silverland-estate-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Silverland Estate Access Control Platform — Decoupled Monorepo",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:admin": "npm --prefix adminweb run dev",
+    "dev:resident": "npm --prefix resident-mobile run dev",
+    "dev:officer": "npm --prefix officer-mobile run dev",
+    "typecheck:backend": "npm --prefix backend run typecheck",
+    "typecheck:admin": "npm --prefix adminweb run typecheck",
+    "typecheck:resident": "npm --prefix resident-mobile run typecheck",
+    "typecheck:officer": "npm --prefix officer-mobile run typecheck"
+  }
+}

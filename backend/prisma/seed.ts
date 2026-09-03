@@ -1,4 +1,12 @@
-import { PrismaClient, Role, VisitorType, ResidentType, ResidentStatus, PropertyStatus, DispatchStatus, VisitorStatus, PassStatus, AccessAction, AccessStatus, NotificationType } from "@prisma/client";
+import dotenv from "dotenv";
+import path from "path";
+
+// Load .env from current directory, backend directory, or root directory
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+
+import { PrismaClient, Role, VisitorType, ResidentType, ResidentStatus, PropertyStatus, DispatchStatus, VisitorStatus, PassStatus, AccessAction, AccessStatus, NotificationType, GatePassType } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -226,6 +234,84 @@ async function main() {
     });
     createdVisitors.push(visitor);
   }
+
+  // 6b. Demo Gate Passes with human-friendly 6-digit codes
+  await prisma.gatePass.deleteMany({});
+
+  // Active Visitor Code
+  await prisma.gatePass.create({
+    data: {
+      code: "849201",
+      token: "DEMOGATE849201",
+      qrContent: "SILVERLAND:DEMOGATE849201",
+      passType: GatePassType.VISITOR,
+      residentId: createdResidents[0].id,
+      visitorName: "David Michael",
+      visitorPhone: "+2348013000001",
+      visitorType: VisitorType.GUEST,
+      vehiclePlate: "KJA-101-QQ",
+      purpose: "Family visit",
+      direction: AccessAction.ENTRY,
+      status: PassStatus.ACTIVE,
+      validFrom: now,
+      expiresAt: new Date(now.getTime() + 2 * 3600 * 1000), // 2 hours
+    },
+  });
+
+  // Active Resident Exit Code
+  await prisma.gatePass.create({
+    data: {
+      code: "712450",
+      token: "DEMOGATE712450",
+      qrContent: "SILVERLAND:DEMOGATE712450",
+      passType: GatePassType.RESIDENT_EXIT,
+      residentId: createdResidents[0].id,
+      vehiclePlate: "ABC-123-XZ",
+      purpose: "Resident Going Out",
+      direction: AccessAction.EXIT,
+      status: PassStatus.ACTIVE,
+      validFrom: now,
+      expiresAt: new Date(now.getTime() + 2 * 3600 * 1000),
+    },
+  });
+
+  // Expired Code (to test denial)
+  await prisma.gatePass.create({
+    data: {
+      code: "390184",
+      token: "DEMOGATE390184",
+      qrContent: "SILVERLAND:DEMOGATE390184",
+      passType: GatePassType.VISITOR,
+      residentId: createdResidents[1].id,
+      visitorName: "Sara Cyril",
+      visitorPhone: "+2348013000002",
+      visitorType: VisitorType.DELIVERY,
+      purpose: "Food delivery",
+      direction: AccessAction.ENTRY,
+      status: PassStatus.EXPIRED,
+      validFrom: new Date(now.getTime() - 4 * 3600 * 1000),
+      expiresAt: new Date(now.getTime() - 2 * 3600 * 1000),
+    },
+  });
+
+  // Used Code (to test already-used denial)
+  await prisma.gatePass.create({
+    data: {
+      code: "551920",
+      token: "DEMOGATE551920",
+      qrContent: "SILVERLAND:DEMOGATE551920",
+      passType: GatePassType.VISITOR,
+      residentId: createdResidents[2].id,
+      visitorName: "Emeka Osondu",
+      purpose: "Plumbing repair",
+      direction: AccessAction.ENTRY,
+      status: PassStatus.USED,
+      usesCount: 1,
+      validFrom: new Date(now.getTime() - 2 * 3600 * 1000),
+      expiresAt: new Date(now.getTime() + 2 * 3600 * 1000),
+      usedAt: new Date(now.getTime() - 30 * 60 * 1000),
+    },
+  });
 
   // 7. Dispatch riders (5)
   const ridersSpec = [

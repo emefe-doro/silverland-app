@@ -3,7 +3,7 @@ import { notify } from "./notify";
 import { writeAudit } from "./audit";
 import { SessionUser } from "./auth";
 import { Roles } from "./constants";
-import { parseQrContent } from "./tokens";
+import { parseQrContent, cleanCodeInput, formatPassCode } from "./tokens";
 
 export async function registerEntryOfficerId(user: SessionUser | null): Promise<string | null> {
   let oid = user?.officerId ?? null;
@@ -172,7 +172,7 @@ export async function visitorCheckOut(
 
 export async function recordDenied(
   actor: SessionUser,
-  personType: "VISITOR" | "DISPATCH",
+  personType: "VISITOR" | "DISPATCH" | "RESIDENT",
   input: {
     token?: string | null;
     visitorId?: string | null;
@@ -201,8 +201,8 @@ export async function recordDenied(
   });
   await writeAudit({
     actor, action: "ACCESS_DENIED",
-    entityType: personType === "VISITOR" ? "Visitor" : "DispatchRider",
-    entityId: input.visitorId ?? input.dispatchId ?? undefined,
+    entityType: personType === "VISITOR" ? "Visitor" : personType === "RESIDENT" ? "Resident" : "DispatchRider",
+    entityId: input.visitorId ?? input.dispatchId ?? input.residentId ?? undefined,
     summary: `Denied: ${input.reason}`,
     ip, userAgent: ua,
   });
@@ -217,6 +217,221 @@ export async function recordDenied(
     }
   );
   return log;
+}
+
+export async function verifyGatePass(raw: string): Promise<{
+  valid: boolean;
+  reason: string;
+  gatePass: any;
+}> {
+  const clean = cleanCodeInput(raw);
+  if (!clean) {
+    return { valid: false, reason: "Please enter a valid pass code or scan a QR code.", gatePass: null };
+  }
+
+  // 1. Try finding in GatePass by code or token
+  const pass = await prisma.gatePass.findFirst({
+    where: {
+      OR: [
+        { code: clean },
+        { token: clean },
+      ],
+    },
+    include: {
+      resident: {
+        include: { property: true, user: { select: { email: true, phone: true } } },
+      },
+    },
+  });
+
+  if (pass) {
+    const isExpired = pass.expiresAt && new Date(pass.expiresAt).getTime() < Date.now();
+    let valid = true;
+    let reason = "";
+
+    if (pass.resident.propertyStatus === "SUSPENDED") {
+      valid = false;
+      reason = "Host resident access is SUSPENDED (unpaid dues). Entry denied.";
+    } else if (pass.status === "REVOKED" || pass.status === "CANCELLED") {
+      valid = false;
+      reason = `Pass has been ${pass.status.toLowerCase()}.`;
+    } else if (pass.status === "USED" || pass.usesCount >= pass.maxUses) {
+      valid = false;
+      reason = `Pass has already been used${pass.usedAt ? ` on ${new Date(pass.usedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}.`;
+    } else if (isExpired) {
+      valid = false;
+      reason = "Pass has expired.";
+    }
+
+    return {
+      valid,
+      reason,
+      gatePass: {
+        id: pass.id,
+        code: pass.code,
+        formattedCode: formatPassCode(pass.code),
+        passType: pass.passType,
+        direction: pass.direction,
+        status: isExpired && pass.status === "ACTIVE" ? "EXPIRED" : pass.status,
+        validFrom: pass.validFrom,
+        expiresAt: pass.expiresAt,
+        usedAt: pass.usedAt,
+        visitorName: pass.visitorName,
+        visitorPhone: pass.visitorPhone,
+        visitorType: pass.visitorType,
+        vehiclePlate: pass.vehiclePlate,
+        purpose: pass.purpose,
+        notes: pass.notes,
+        resident: {
+          id: pass.resident.id,
+          name: `${pass.resident.firstName} ${pass.resident.lastName}`,
+          unitNumber: pass.resident.property?.unitNumber ?? "Unit",
+          block: pass.resident.property?.block ?? "",
+          phone: pass.resident.phone,
+        },
+      },
+    };
+  }
+
+  // 2. Fallback: try finding in legacy VisitorPass
+  const legacy = await resolveVisitorQr(raw);
+  if (legacy.pass) {
+    const p = legacy.pass;
+    const v = p.visitor;
+    const res = v?.resident;
+    return {
+      valid: legacy.allowed,
+      reason: legacy.reason,
+      gatePass: {
+        id: p.id,
+        code: p.token.slice(0, 6).toUpperCase(),
+        formattedCode: p.token.slice(0, 6).toUpperCase(),
+        passType: "VISITOR",
+        direction: "ENTRY",
+        status: p.status,
+        expiresAt: p.expiresAt,
+        visitorName: v?.fullName,
+        visitorPhone: v?.phone,
+        visitorType: v?.visitorType ?? "GUEST",
+        vehiclePlate: v?.vehiclePlate,
+        purpose: v?.purpose,
+        resident: res ? {
+          id: res.id,
+          name: `${res.firstName} ${res.lastName}`,
+          unitNumber: res.property?.unitNumber ?? "Unit",
+          block: res.property?.block ?? "",
+          phone: res.phone,
+        } : null,
+      },
+    };
+  }
+
+  return { valid: false, reason: "Code not recognized. Access denied.", gatePass: null };
+}
+
+export async function confirmGateAccess(
+  rawOrId: string,
+  actor: SessionUser,
+  ip?: string | null,
+  ua?: string | null,
+  opts?: { action?: "ENTRY" | "EXIT"; vehiclePlate?: string | null; notes?: string | null }
+) {
+  const clean = cleanCodeInput(rawOrId);
+  const pass = await prisma.gatePass.findFirst({
+    where: {
+      OR: [
+        { id: rawOrId.length === 36 ? rawOrId : undefined },
+        { code: clean },
+        { token: clean },
+      ].filter(Boolean) as any,
+    },
+    include: {
+      resident: { include: { property: true, user: true } },
+    },
+  });
+
+  if (!pass) {
+    return visitorCheckIn(rawOrId, actor, ip, ua, { vehiclePlate: opts?.vehiclePlate });
+  }
+
+  const isExpired = pass.expiresAt && new Date(pass.expiresAt).getTime() < Date.now();
+  if (pass.status === "REVOKED" || pass.status === "CANCELLED") {
+    await recordDenied(actor, pass.passType === "VISITOR" ? "VISITOR" : "RESIDENT", { token: pass.code, residentId: pass.residentId, reason: `Pass is ${pass.status.toLowerCase()}` }, ip, ua);
+    return { ok: false, reason: `Pass is ${pass.status.toLowerCase()}.` };
+  }
+  if (pass.status === "USED" || pass.usesCount >= pass.maxUses) {
+    await recordDenied(actor, pass.passType === "VISITOR" ? "VISITOR" : "RESIDENT", { token: pass.code, residentId: pass.residentId, reason: "Pass has already been used." }, ip, ua);
+    return { ok: false, reason: "Pass has already been used." };
+  }
+  if (isExpired) {
+    await recordDenied(actor, pass.passType === "VISITOR" ? "VISITOR" : "RESIDENT", { token: pass.code, residentId: pass.residentId, reason: "Pass has expired." }, ip, ua);
+    return { ok: false, reason: "Pass has expired." };
+  }
+
+  const action = opts?.action || (pass.direction === "EXIT" ? "EXIT" : "ENTRY");
+  const personType = pass.passType === "VISITOR" ? "VISITOR" : "RESIDENT";
+  const vehiclePlate = opts?.vehiclePlate || pass.vehiclePlate || null;
+  const oid = await registerEntryOfficerId(actor);
+
+  const log = await prisma.accessLog.create({
+    data: {
+      personType: personType as any,
+      action: action as any,
+      status: action === "ENTRY" ? "INSIDE" : "EXITED",
+      gatePassId: pass.id,
+      residentId: pass.residentId,
+      propertyId: pass.resident.propertyId ?? null,
+      vehiclePlate,
+      token: pass.code,
+      securityOfficerId: oid,
+      source: "MOBILE_VERIFIED",
+      notes: opts?.notes ?? pass.notes ?? null,
+      deviceInfo: { ip, ua } as any,
+      entryAt: action === "ENTRY" ? new Date() : undefined,
+      exitAt: action === "EXIT" ? new Date() : undefined,
+    },
+  });
+
+  const nextUses = pass.usesCount + 1;
+  const nextStatus = nextUses >= pass.maxUses ? "USED" : "ACTIVE";
+  await prisma.gatePass.update({
+    where: { id: pass.id },
+    data: {
+      usesCount: nextUses,
+      status: nextStatus,
+      usedAt: new Date(),
+    },
+  });
+
+  // Notify resident
+  if (pass.resident.userId) {
+    const holderDesc = pass.passType === "VISITOR" ? (pass.visitorName || "Your visitor") : "Resident pass";
+    await notify([{ userId: pass.resident.userId }], {
+      type: action === "ENTRY" ? "VISITOR_ARRIVAL" : "VISITOR_CHECKOUT",
+      title: `${holderDesc} — Gate ${action === "ENTRY" ? "Entry" : "Exit"} Confirmed`,
+      message: `${holderDesc} was granted gate ${action.toLowerCase()} by ${actor.name}.`,
+      actorName: actor.name,
+      link: "/resident/history",
+    });
+  }
+
+  await writeAudit({
+    actor,
+    action: action === "ENTRY" ? "GATE_ENTRY_GRANTED" : "GATE_EXIT_GRANTED",
+    entityType: "GatePass",
+    entityId: pass.id,
+    summary: `Granted ${action.toLowerCase()} for ${pass.passType}: ${pass.visitorName || pass.resident.firstName} (Code: ${formatPassCode(pass.code)})`,
+    ip,
+    userAgent: ua,
+  });
+
+  return {
+    ok: true,
+    message: `Access granted (${action}).`,
+    accessLogId: log.id,
+    action,
+    personType,
+  };
 }
 
 export async function revokePass(passId: string, revokerId: string) {

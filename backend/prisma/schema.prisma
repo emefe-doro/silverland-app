@@ -37,6 +37,7 @@ enum ResidentType {
 enum ResidentStatus {
   ACTIVE
   INACTIVE
+  SUSPENDED
 }
 
 enum ResidentSource {
@@ -80,7 +81,15 @@ enum DispatchStatus {
   EXPIRED
 }
 
+enum GatePassType {
+  VISITOR
+  RESIDENT_EXIT
+  RESIDENT_ENTRY
+  RESIDENT_ROUNDTRIP
+}
+
 enum PersonType {
+  RESIDENT
   VISITOR
   DISPATCH
   VEHICLE
@@ -185,6 +194,7 @@ model Resident {
   visitors         Visitor[]          @relation("ResidentVisited")
   dispatchRiders   DispatchRider[]
   vehicles         Vehicle[]
+  gatePasses       GatePass[]
   accessLogs       AccessLog[]
 
   @@index([firstName, lastName])
@@ -264,6 +274,38 @@ model VisitorPass {
   @@index([visitorId])
 }
 
+model GatePass {
+  id              String        @id @default(uuid()) @db.Uuid
+  code            String        @unique // 6-digit code e.g. "849201"
+  token           String        @unique // cryptographic token for QR
+  qrContent       String
+  passType        GatePassType  @default(VISITOR)
+  residentId      String        @db.Uuid
+  visitorName     String?
+  visitorPhone    String?
+  visitorType     VisitorType?  @default(GUEST)
+  vehiclePlate    String?
+  purpose         String?
+  direction       AccessAction  @default(ENTRY)
+  status          PassStatus    @default(ACTIVE)
+  maxUses         Int           @default(1)
+  usesCount       Int           @default(0)
+  validFrom       DateTime      @default(now())
+  expiresAt       DateTime
+  usedAt          DateTime?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  resident        Resident      @relation(fields: [residentId], references: [id])
+  accessLogs      AccessLog[]
+
+  @@index([code])
+  @@index([token])
+  @@index([residentId])
+  @@index([status])
+}
+
 // ---------------------------- Dispatch Riders ----------------------------
 
 model DispatchRider {
@@ -310,6 +352,7 @@ model AccessLog {
   action            AccessAction
   status            AccessStatus
   token             String?       // scanned pass token, if any
+  gatePassId        String?       @db.Uuid
   entryAt           DateTime      @default(now())
   exitAt            DateTime?
   durationSeconds   Int?
@@ -325,6 +368,7 @@ model AccessLog {
   property        Property?        @relation(fields: [propertyId], references: [id])
   vehicle         Vehicle?         @relation(fields: [vehicleId], references: [id])
   securityOfficer SecurityOfficer? @relation(fields: [securityOfficerId], references: [id])
+  gatePass        GatePass?        @relation(fields: [gatePassId], references: [id])
 
   @@index([personType])
   @@index([action])

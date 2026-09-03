@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef4fb;
+  --color-brand-100: #d8e7f6;
+  --color-brand-200: #b3ceec;
+  --color-brand-300: #85aede;
+  --color-brand-400: #4f87cd;
+  --color-brand-500: #2b6cb8;
+  --color-brand-600: #0b3b7c;
+  --color-brand-700: #0a3368;
+  --color-brand-800: #082a54;
+  --color-brand-900: #061f40;
+
+  --color-ink: #101828;
+  --color-muted: #667085;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+  background: #f1f5f9;
+}
+
+body {
+  color: #101828;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+/* Mobile container styling */
+.mobile-shell {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+}
+
+@utility card {
+  @apply bg-white border border-slate-200 rounded-2xl shadow-sm;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl
+    px-4 py-3 text-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed
+    focus:outline-none focus:ring-2 focus:ring-brand-400;
+}
+
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 shadow-md shadow-brand-900/10;
+}
+
+@utility btn-secondary {
+  @apply btn bg-slate-100 text-slate-700 hover:bg-slate-200;
+}
+
+@utility btn-outline {
+  @apply btn border-2 border-brand-600 text-brand-700 hover:bg-brand-50;
+}
+
+@utility input {
+  @apply w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-3 text-sm
+    placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400
+    focus:bg-white focus:border-brand-400 transition-colors;
+}
+
+@utility label {
+  @apply block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5;
+}
+
+@utility badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold;
+}
+
+@utility badge-green {
+  @apply badge bg-emerald-50 text-emerald-700 border border-emerald-200;
+}
+
+@utility badge-red {
+  @apply badge bg-rose-50 text-rose-700 border border-rose-200;
+}
+
+@utility badge-blue {
+  @apply badge bg-sky-50 text-sky-700 border border-sky-200;
+}
+
+@utility badge-gray {
+  @apply badge bg-slate-100 text-slate-600 border border-slate-200;
+}
