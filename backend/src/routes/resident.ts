@@ -43,7 +43,7 @@ router.get("/history", authRequired(["RESIDENT"]), asyncH(async (req, res) => {
     }),
     prisma.visitor.findMany({
       where: { residentId: user.residentId },
-      include: { passes: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: { gatePasses: { orderBy: { createdAt: "desc" }, take: 1 } },
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
@@ -252,7 +252,7 @@ router.get("/codes", authRequired(["RESIDENT"]), asyncH(async (req, res) => {
 
   const now = Date.now();
   const enriched = await Promise.all(
-    passes.map(async (p) => {
+    passes.map(async (p: any) => {
       const isExpired = p.expiresAt && new Date(p.expiresAt).getTime() < now;
       const status = isExpired && p.status === "ACTIVE" ? "EXPIRED" : p.status;
       return {
@@ -264,8 +264,8 @@ router.get("/codes", authRequired(["RESIDENT"]), asyncH(async (req, res) => {
     })
   );
 
-  const active = enriched.filter((p) => p.status === "ACTIVE");
-  const past = enriched.filter((p) => p.status !== "ACTIVE");
+  const active = enriched.filter((p: any) => p.status === "ACTIVE");
+  const past = enriched.filter((p: any) => p.status !== "ACTIVE");
 
   res.json({ active, past, total: passes.length });
 }));

@@ -246,32 +246,12 @@ model Visitor {
   resident       Resident?        @relation("ResidentVisited", fields: [residentId], references: [id])
   registeredBy   User?            @relation("RegisteredBy", fields: [registeredById], references: [id])
   approvedBy     User?            @relation("ApprovedBy", fields: [approvedById], references: [id])
-  passes         VisitorPass[]
+  gatePasses     GatePass[]
   accessLogs     AccessLog[]
 
   @@index([fullName])
   @@index([phone])
   @@index([residentId])
-}
-
-model VisitorPass {
-  id           String     @id @default(uuid()) @db.Uuid
-  visitorId    String     @db.Uuid
-  token        String     @unique
-  qrContent    String
-  issuedAt     DateTime   @default(now())
-  expiresAt    DateTime?
-  status       PassStatus @default(ACTIVE)
-  maxUses      Int        @default(1)
-  usesCount    Int        @default(0)
-  revokedAt    DateTime?
-  revokedById  String?    @db.Uuid
-  createdAt    DateTime   @default(now())
-
-  visitor Visitor? @relation(fields: [visitorId], references: [id])
-
-  @@index([token])
-  @@index([visitorId])
 }
 
 model GatePass {
@@ -281,6 +261,7 @@ model GatePass {
   qrContent       String
   passType        GatePassType  @default(VISITOR)
   residentId      String        @db.Uuid
+  visitorId       String?       @db.Uuid
   visitorName     String?
   visitorPhone    String?
   visitorType     VisitorType?  @default(GUEST)
@@ -298,11 +279,13 @@ model GatePass {
   updatedAt       DateTime      @updatedAt
 
   resident        Resident      @relation(fields: [residentId], references: [id])
+  visitor         Visitor?      @relation(fields: [visitorId], references: [id], onDelete: SetNull)
   accessLogs      AccessLog[]
 
   @@index([code])
   @@index([token])
   @@index([residentId])
+  @@index([visitorId])
   @@index([status])
 }
 

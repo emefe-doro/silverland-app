@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db";
-import { renderQrDataUrl, generateSecureToken, qrContentForToken } from "../tokens";
+import { renderQrDataUrl, generateSecureToken, qrContentForToken, generateUniqueGatePassCode, formatPassCode } from "../tokens";
 import { notify } from "../notify";
 import { writeAudit } from "../audit";
 import { asyncH, ApiError } from "../guard";
@@ -20,9 +20,9 @@ router.get("/:id", authRequired(ALL as any), asyncH(async (req, res) => {
   const visitor = await prisma.visitor.findUnique({
     where: { id: req.params.id },
     include: {
-      resident: { include: { property: true } },
-      passes: { orderBy: { createdAt: "desc" } },
-      accessLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+      resident: { select: { id: true, firstName: true, lastName: true, property: true } },
+      gatePasses: { orderBy: { createdAt: "desc" } },
+      accessLogs: { orderBy: { createdAt: "desc" }, take: 10 },
     },
   });
   if (!visitor) throw new ApiError("Visitor not found.", 404);
@@ -35,7 +35,7 @@ router.delete("/:id", authRequired(ALL as any), asyncH(async (req, res) => {
   if (!visitor) throw new ApiError("Visitor not found.", 404);
   await assertOwnership(req.user!, visitor.residentId);
   await prisma.$transaction([
-    prisma.visitorPass.updateMany({ where: { visitorId: visitor.id }, data: { status: "CANCELLED", revokedAt: new Date(), revokedById: req.user!.sub } }),
+    prisma.gatePass.updateMany({ where: { visitorId: visitor.id }, data: { status: "CANCELLED" } }),
     prisma.visitor.update({ where: { id: visitor.id }, data: { status: "CANCELLED" } }),
   ]);
   await writeAudit({
@@ -51,7 +51,7 @@ router.post("/:id/approve", authRequired(STAFF as any), asyncH(async (req, res) 
   if (!visitor) throw new ApiError("Visitor not found.", 404);
   await prisma.$transaction([
     prisma.visitor.update({ where: { id: visitor.id }, data: { status: "APPROVED" } }),
-    prisma.visitorPass.updateMany({ where: { visitorId: visitor.id }, data: { status: "ACTIVE" } }),
+    prisma.gatePass.updateMany({ where: { visitorId: visitor.id }, data: { status: "ACTIVE" } }),
   ]);
   await notify([{ userId: visitor.resident?.userId ?? null }], {
     type: "VISITOR_APPROVAL", title: "Visitor approved",
@@ -68,7 +68,7 @@ router.post("/:id/deny", authRequired(STAFF as any), asyncH(async (req, res) => 
   if (!visitor) throw new ApiError("Visitor not found.", 404);
   await prisma.$transaction([
     prisma.visitor.update({ where: { id: visitor.id }, data: { status: "DENIED" } }),
-    prisma.visitorPass.updateMany({ where: { visitorId: visitor.id }, data: { status: "REVOKED", revokedAt: new Date(), revokedById: req.user!.sub } }),
+    prisma.gatePass.updateMany({ where: { visitorId: visitor.id }, data: { status: "CANCELLED" } }),
   ]);
   await notify([{ userId: visitor.resident?.userId ?? null }], {
     type: "VISITOR_DENIED", title: "Visitor denied",
@@ -90,13 +90,16 @@ router.post("/:id/expected", authRequired(ALL as any), asyncH(async (req, res) =
 }));
 
 router.get("/:id/pass", authRequired(ALL as any), asyncH(async (req, res) => {
-  const visitor = await prisma.visitor.findUnique({ where: { id: req.params.id }, include: { passes: { orderBy: { createdAt: "desc" } } } });
+  const visitor = await prisma.visitor.findUnique({ where: { id: req.params.id } });
   if (!visitor) throw new ApiError("Visitor not found.", 404);
   await assertOwnership(req.user!, visitor.residentId);
-  const pass = visitor.passes[0];
-  if (!pass) throw new ApiError("No pass.", 404);
+  const pass = await prisma.gatePass.findFirst({
+    where: { visitorId: visitor.id },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!pass) throw new ApiError("No pass found for visitor.", 404);
   const qrDataUrl = await renderQrDataUrl(pass.qrContent);
-  res.json({ pass, qrDataUrl });
+  res.json({ pass: { ...pass, formattedCode: formatPassCode(pass.code) }, qrDataUrl });
 }));
 
 router.post("/:id/pass", authRequired(ALL as any), asyncH(async (req, res) => {
@@ -106,16 +109,37 @@ router.post("/:id/pass", authRequired(ALL as any), asyncH(async (req, res) => {
   const settings = await prisma.estateSettings.findUnique({ where: { id: 1 } });
   const validityHours = settings?.visitorPassValidityHours ?? 24;
   const token = generateSecureToken();
-  const pass = await prisma.visitorPass.create({
+  const code = await generateUniqueGatePassCode();
+
+  // Cancel any existing active passes for this visitor
+  await prisma.gatePass.updateMany({
+    where: { visitorId: visitor.id, status: "ACTIVE" },
+    data: { status: "CANCELLED" },
+  });
+
+  const pass = await prisma.gatePass.create({
     data: {
-      visitorId: visitor.id, token, qrContent: qrContentForToken(token), status: "ACTIVE",
-      expiresAt: new Date(Date.now() + validityHours * 3600 * 1000), maxUses: 1,
+      code,
+      token,
+      qrContent: qrContentForToken(token),
+      passType: "VISITOR",
+      residentId: visitor.residentId!,
+      visitorId: visitor.id,
+      visitorName: visitor.fullName,
+      visitorPhone: visitor.phone,
+      visitorType: visitor.visitorType,
+      vehiclePlate: visitor.vehiclePlate,
+      purpose: visitor.purpose,
+      direction: "ENTRY",
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + validityHours * 3600 * 1000),
+      maxUses: 1,
     },
   });
-  await prisma.visitorPass.updateMany({ where: { visitorId: visitor.id, id: { not: pass.id } }, data: { status: "CANCELLED", revokedAt: new Date(), revokedById: req.user!.sub } });
+
   const qrDataUrl = await renderQrDataUrl(pass.qrContent);
-  await writeAudit({ actor: req.user!, action: "VISITOR_PASS_REGENERATED", entityType: "VisitorPass", entityId: pass.id, summary: `New pass for ${visitor.fullName}` });
-  res.status(201).json({ pass, qrDataUrl });
+  await writeAudit({ actor: req.user!, action: "VISITOR_PASS_REGENERATED", entityType: "GatePass", entityId: pass.id, summary: `New pass (${formatPassCode(code)}) for ${visitor.fullName}` });
+  res.status(201).json({ pass: { ...pass, formattedCode: formatPassCode(code) }, qrDataUrl });
 }));
 
 export default router;

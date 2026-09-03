@@ -181,7 +181,8 @@ async function main() {
   //    always shows "expected today" / activity for the current day.
   //    Clean out any previous demo records for idempotent re-seeding.
   await prisma.accessLog.deleteMany({ where: { notes: { contains: "DEMO DATA" } } });
-  await prisma.visitorPass.deleteMany({ where: { OR: [{ token: { startsWith: "DEMOTOKEN" } }, { token: { startsWith: "DISPATCH" } }] } });
+  await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "VisitorPass" CASCADE;').catch(() => null);
+  await prisma.$executeRawUnsafe('DELETE FROM "GatePass";').catch(() => null);
   await prisma.visitor.deleteMany({ where: { notes: null } });
   await prisma.dispatchRider.deleteMany({ where: { passToken: { startsWith: "DISPATCH" } } });
 
@@ -216,20 +217,6 @@ async function main() {
         expectedDeparture: departure,
         status: vs.status,
         registeredById: createdResidents[0] ? (await prisma.user.findFirst({ where: { role: Role.RESIDENT } }))?.id ?? null : null,
-      },
-    });
-
-    const token = `DEMOTOKEN${String(i + 1).padStart(4, "0")}${(i + 1) * 111}`;
-    const expiresAt = new Date(arrival.getTime() + 24 * 3600 * 1000);
-    await prisma.visitorPass.create({
-      data: {
-        visitorId: visitor.id,
-        token,
-        qrContent: `SILVERLAND:${token}`,
-        status: i === 0 ? PassStatus.ACTIVE : i === 4 ? PassStatus.EXPIRED : PassStatus.ACTIVE,
-        expiresAt,
-        maxUses: 1,
-        usesCount: i === 2 ? 1 : 0,
       },
     });
     createdVisitors.push(visitor);
@@ -361,9 +348,9 @@ async function main() {
     const nowRef = new Date(Date.now() - a.minutesAgo * 60000);
     const entry = nowRef;
     const exitAt = a.exitMinutesAgo ? new Date(Date.now() - a.exitMinutesAgo * 60000) : null;
-    const duration = a.exitMinutesAgo ? Math.round((entry.getTime() - exitAt.getTime()) / 1000) : null;
+    const duration = (a.exitMinutesAgo && exitAt) ? Math.round((entry.getTime() - exitAt.getTime()) / 1000) : null;
     if (a.personType === "VISITOR") {
-      const vis = createdVisitors[a.visitorIndex];
+      const vis = a.visitorIndex !== undefined ? createdVisitors[a.visitorIndex] : undefined;
       if (!vis) continue;
       await prisma.accessLog.create({
         data: {
@@ -382,7 +369,10 @@ async function main() {
         },
       });
     } else {
-      const rider = await prisma.dispatchRider.findFirst({ where: { orderReference: ["XYZ-12345", "FD-77321", "GIG-99887", "JX-55410", "BLT-33345"][a.riderIndex] } });
+      const riderOrders = ["XYZ-12345", "FD-77321", "GIG-99887", "JX-55410", "BLT-33345"];
+      const orderRef = a.riderIndex !== undefined ? riderOrders[a.riderIndex] : undefined;
+      if (!orderRef) continue;
+      const rider = await prisma.dispatchRider.findFirst({ where: { orderReference: orderRef } });
       if (!rider) continue;
       await prisma.accessLog.create({
         data: {

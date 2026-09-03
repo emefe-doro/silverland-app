@@ -13,7 +13,7 @@ router.get("/", authRequired(["SUPER_ADMIN", "ESTATE_MANAGEMENT", "SECURITY_OFFI
   const [visitors, residents, riders, vehicles] = await Promise.all([
     prisma.visitor.findMany({
       where: { OR: [{ fullName: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { vehiclePlate: { contains: q, mode: "insensitive" } }] },
-      include: { resident: { include: { property: true } }, passes: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: { resident: { include: { property: true } }, gatePasses: { orderBy: { createdAt: "desc" }, take: 1 } },
       take: limit,
     }),
     prisma.resident.findMany({

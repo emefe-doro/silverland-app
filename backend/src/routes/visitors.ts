@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { generateSecureToken, qrContentForToken } from "../tokens";
+import { generateSecureToken, qrContentForToken, generateUniqueGatePassCode } from "../tokens";
 import { notify } from "../notify";
 import { writeAudit } from "../audit";
 import { asyncH, ApiError } from "../guard";
@@ -11,18 +11,16 @@ import { VISITOR_TYPE_LABEL } from "../constants";
 
 const router = Router();
 const STAFF_AND_RESIDENT = ["SUPER_ADMIN", "ESTATE_MANAGEMENT", "SECURITY_OFFICER", "RESIDENT"];
-const APPROVAL_ROLES = ["SUPER_ADMIN", "ESTATE_MANAGEMENT", "SECURITY_OFFICER"];
 
-type StringLike = string | string[] | undefined;
-
-router.get("/", authRequired([...STAFF_AND_RESIDENT] as any), asyncH(async (req, res) => {
-  const q = (req.query.q as StringLike) ?? "";
-  const status = (req.query.status as StringLike) ?? "";
-  const type = (req.query.type as StringLike) ?? "";
+router.get("/", authRequired(STAFF_AND_RESIDENT as any), asyncH(async (req, res) => {
+  const user = req.user!;
+  const q = ((req.query.q as string) ?? "").trim();
+  const status = (req.query.status as string) || "";
+  const type = (req.query.type as string) || "";
   const limit = Math.min(Number((req.query.limit as string) || 50), 200);
 
   const where: any = {};
-  if (req.user!.role === "RESIDENT" && req.user!.residentId) where.residentId = req.user!.residentId;
+  if (user.role === "RESIDENT" && user.residentId) where.residentId = user.residentId;
   if (status) where.status = status;
   if (type) where.visitorType = type;
   if (q) {
@@ -30,14 +28,15 @@ router.get("/", authRequired([...STAFF_AND_RESIDENT] as any), asyncH(async (req,
       { fullName: { contains: q, mode: "insensitive" } },
       { phone: { contains: q } },
       { vehiclePlate: { contains: q, mode: "insensitive" } },
+      { purpose: { contains: q, mode: "insensitive" } },
     ];
   }
 
   const visitors = await prisma.visitor.findMany({
     where,
     include: {
-      resident: { include: { property: true } },
-      passes: { orderBy: { createdAt: "desc" }, take: 1 },
+      resident: { select: { id: true, firstName: true, lastName: true, property: true } },
+      gatePasses: { orderBy: { createdAt: "desc" }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -47,11 +46,11 @@ router.get("/", authRequired([...STAFF_AND_RESIDENT] as any), asyncH(async (req,
 }));
 
 const createSchema = z.object({
-  residentId: z.string().optional().nullable(),
-  fullName: z.string().min(1),
+  fullName: z.string().min(1, "Full name required"),
   phone: z.string().optional().nullable(),
-  visitorType: z.string().optional(),
+  visitorType: z.enum(["GUEST", "FAMILY", "DELIVERY", "SERVICE", "CONTRACTOR", "OTHER"]).default("GUEST"),
   purpose: z.string().optional().nullable(),
+  residentId: z.string().optional().nullable(),
   expectedDate: z.string().optional().nullable(),
   expectedArrival: z.string().optional().nullable(),
   expectedDeparture: z.string().optional().nullable(),
@@ -60,33 +59,32 @@ const createSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
-router.post("/", authRequired([...STAFF_AND_RESIDENT] as any), asyncH(async (req, res) => {
+router.post("/", authRequired(STAFF_AND_RESIDENT as any), asyncH(async (req, res) => {
+  const user = req.user!;
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) throw new ApiError(parsed.error.issues[0].message, 400);
   const d = parsed.data;
-  const user = req.user!;
 
   let residentId = d.residentId ?? null;
   if (user.role === "RESIDENT") {
-    if (!user.residentId) throw new ApiError("Resident profile not linked.", 400);
+    if (!user.residentId) throw new ApiError("No resident profile linked to this user.", 403);
     residentId = user.residentId;
   }
-  if (!residentId) throw new ApiError("A resident is required.", 400);
+  if (!residentId) throw new ApiError("Resident ID required.", 400);
 
   const settings = await prisma.estateSettings.findUnique({ where: { id: 1 } });
-  const registeredByOfficer = APPROVAL_ROLES.includes(user.role);
-  const approvalRequired = settings?.residentsMustApproveVisitors !== false && !registeredByOfficer;
+  const approvalRequired = (settings?.residentsMustApproveVisitors ?? false) && user.role !== "RESIDENT";
 
   const visitor = await prisma.visitor.create({
     data: {
       residentId,
       fullName: d.fullName,
       phone: d.phone ?? null,
-      visitorType: (d.visitorType as any) ?? "GUEST",
+      visitorType: d.visitorType as any,
       purpose: d.purpose ?? null,
-      expectedDate: await toDate(d.expectedDate),
-      expectedArrival: await toDate(d.expectedArrival),
-      expectedDeparture: await toDate(d.expectedDeparture),
+      expectedDate: toDate(d.expectedDate),
+      expectedArrival: toDate(d.expectedArrival),
+      expectedDeparture: toDate(d.expectedDeparture),
       vehicleType: d.vehicleType ?? null,
       vehiclePlate: d.vehiclePlate ?? null,
       notes: d.notes ?? null,
@@ -97,11 +95,21 @@ router.post("/", authRequired([...STAFF_AND_RESIDENT] as any), asyncH(async (req
 
   const validityHours = settings?.visitorPassValidityHours ?? 24;
   const token = generateSecureToken();
-  const pass = await prisma.visitorPass.create({
+  const code = await generateUniqueGatePassCode();
+  const pass = await prisma.gatePass.create({
     data: {
-      visitorId: visitor.id,
+      code,
       token,
       qrContent: qrContentForToken(token),
+      passType: "VISITOR",
+      residentId,
+      visitorId: visitor.id,
+      visitorName: visitor.fullName,
+      visitorPhone: visitor.phone,
+      visitorType: visitor.visitorType,
+      vehiclePlate: visitor.vehiclePlate,
+      purpose: visitor.purpose,
+      direction: "ENTRY",
       status: "ACTIVE",
       expiresAt: new Date(Date.now() + validityHours * 3600 * 1000),
       maxUses: 1,

@@ -15,23 +15,19 @@ export async function registerEntryOfficerId(user: SessionUser | null): Promise<
 }
 
 export async function evaluateVisitorPass(passId: string) {
-  const pass = await prisma.visitorPass.findUnique({
+  const pass = await prisma.gatePass.findUnique({
     where: { id: passId },
-    include: { visitor: true },
+    include: { resident: true },
   });
   if (!pass) return { allowed: false, reason: "Pass not found.", pass: null as any };
+  if (pass.resident?.propertyStatus === "SUSPENDED")
+    return { allowed: false, reason: "Host resident access is SUSPENDED (unpaid dues).", pass };
   if (pass.status === "REVOKED" || pass.status === "CANCELLED")
     return { allowed: false, reason: `Pass is ${pass.status.toLowerCase()}.`, pass };
   if (pass.status === "USED" && pass.maxUses <= pass.usesCount)
     return { allowed: false, reason: "Pass has already been used.", pass };
   if (pass.expiresAt && new Date(pass.expiresAt).getTime() < Date.now())
     return { allowed: false, reason: "Pass has expired.", pass };
-  if (pass.visitor?.status === "CANCELLED" || pass.visitor?.status === "DENIED")
-    return { allowed: false, reason: `Visitor status is ${pass.visitor.status.toLowerCase()}.`, pass };
-  if (pass.visitor?.status === "PENDING")
-    return { allowed: false, reason: "Visitor is awaiting approval.", pass };
-  if (pass.visitor?.status === "EXPIRED")
-    return { allowed: false, reason: "Visitor pass appointment has expired.", pass };
   return { allowed: true, reason: "", pass };
 }
 
@@ -43,10 +39,10 @@ export async function resolveVisitorQr(raw: string): Promise<{
 }> {
   const token = parseQrContent(raw);
   if (!token) return { parsed: false, allowed: false, reason: "Invalid QR format.", pass: null };
-  const pass = await prisma.visitorPass.findUnique({
-    where: { token },
+  const pass = await prisma.gatePass.findFirst({
+    where: { OR: [{ token }, { code: token }] },
     include: {
-      visitor: { include: { resident: { include: { property: true } }, registeredBy: true } },
+      resident: { include: { property: true } },
     },
   });
   if (!pass) {
@@ -66,10 +62,10 @@ export async function visitorCheckIn(
   const token = parseQrContent(raw);
   if (!token) return { ok: false as const, reason: "Invalid QR format." };
 
-  const pass = await prisma.visitorPass.findUnique({
-    where: { token },
+  const pass = await prisma.gatePass.findFirst({
+    where: { OR: [{ token }, { code: token }] },
     include: {
-      visitor: { include: { resident: { include: { property: true } }, registeredBy: true } },
+      resident: { include: { property: true } },
     },
   });
 
@@ -82,8 +78,7 @@ export async function visitorCheckIn(
   if (!evalRes.allowed) {
     await recordDenied(actor, "VISITOR", {
       token,
-      visitorId: pass.visitorId,
-      residentId: pass.visitor?.residentId,
+      residentId: pass.residentId,
       reason: evalRes.reason,
     }, ip, ua);
     return { ok: false as const, reason: evalRes.reason };
@@ -92,50 +87,50 @@ export async function visitorCheckIn(
   const oid = await registerEntryOfficerId(actor);
   const log = await prisma.accessLog.create({
     data: {
-      personType: "VISITOR",
+      personType: pass.passType === "VISITOR" ? "VISITOR" : "RESIDENT",
       visitorId: pass.visitorId,
-      residentId: pass.visitor?.residentId ?? null,
-      propertyId: pass.visitor?.resident?.propertyId ?? null,
-      action: "ENTRY",
+      residentId: pass.residentId,
+      propertyId: pass.resident?.propertyId ?? null,
+      gatePassId: pass.id,
+      action: pass.direction || "ENTRY",
       status: "INSIDE",
-      token,
+      token: pass.token,
       securityOfficerId: oid,
-      vehiclePlate: opts?.vehiclePlate ?? pass.visitor?.vehiclePlate ?? null,
+      vehiclePlate: opts?.vehiclePlate ?? pass.vehiclePlate ?? null,
       source: "SCAN",
       deviceInfo: { ip, ua } as any,
     },
   });
 
-  await prisma.visitorPass.update({
+  await prisma.gatePass.update({
     where: { id: pass.id },
-    data: { usesCount: { increment: 1 }, status: pass.maxUses <= pass.usesCount + 1 ? "USED" : "ACTIVE" },
+    data: {
+      usesCount: { increment: 1 },
+      status: pass.maxUses <= pass.usesCount + 1 ? "USED" : "ACTIVE",
+      usedAt: new Date(),
+    },
   });
-  await prisma.visitor.update({
-    where: { id: pass.visitorId },
-    data: { status: "APPROVED" },
-  });
+  if (pass.visitorId) {
+    await prisma.visitor.update({
+      where: { id: pass.visitorId },
+      data: { status: "APPROVED" },
+    }).catch(() => null);
+  }
 
-  await notify([{ userId: pass.visitor?.registeredBy?.id ?? null }], {
-    type: "VISITOR_ARRIVAL",
-    title: "Your pre-registered guest arrived",
-    message: `${pass.visitor?.fullName} arrived at the estate gate.`,
-    actorName: actor.name,
-    link: "/resident/visitors",
-  });
-  const residentUser = pass.visitor?.resident?.userId;
-  const extraTargets = residentUser && residentUser !== pass.visitor?.registeredBy?.id ? [{ userId: residentUser }] : [];
-  await notify(extraTargets, {
-    type: "VISITOR_ARRIVAL",
-    title: "Visitor arrived",
-    message: `${pass.visitor?.fullName} is at the gate (${pass.visitor?.purpose ?? "visit"}).`,
-    actorName: actor.name,
-    link: "/resident/visitors",
-  });
+  if (pass.resident?.userId) {
+    await notify([{ userId: pass.resident.userId }], {
+      type: "VISITOR_ARRIVAL",
+      title: "Visitor arrived",
+      message: `${pass.visitorName || "Your visitor"} arrived at the estate gate.`,
+      actorName: actor.name,
+      link: "/resident/history",
+    });
+  }
 
   await writeAudit({
     actor, action: "VISITOR_ENTRY",
-    entityType: "Visitor", entityId: pass.visitorId,
-    summary: `${pass.visitor?.resident?.firstName ?? ""} ${pass.visitor?.resident?.lastName ?? ""} visit — ${pass.visitor?.fullName}`,
+    entityType: "GatePass", entityId: pass.id,
+    summary: `${pass.resident?.firstName ?? ""} ${pass.resident?.lastName ?? ""} visit — ${pass.visitorName || "Visitor"}`,
     ip, userAgent: ua,
   });
 
@@ -293,40 +288,7 @@ export async function verifyGatePass(raw: string): Promise<{
     };
   }
 
-  // 2. Fallback: try finding in legacy VisitorPass
-  const legacy = await resolveVisitorQr(raw);
-  if (legacy.pass) {
-    const p = legacy.pass;
-    const v = p.visitor;
-    const res = v?.resident;
-    return {
-      valid: legacy.allowed,
-      reason: legacy.reason,
-      gatePass: {
-        id: p.id,
-        code: p.token.slice(0, 6).toUpperCase(),
-        formattedCode: p.token.slice(0, 6).toUpperCase(),
-        passType: "VISITOR",
-        direction: "ENTRY",
-        status: p.status,
-        expiresAt: p.expiresAt,
-        visitorName: v?.fullName,
-        visitorPhone: v?.phone,
-        visitorType: v?.visitorType ?? "GUEST",
-        vehiclePlate: v?.vehiclePlate,
-        purpose: v?.purpose,
-        resident: res ? {
-          id: res.id,
-          name: `${res.firstName} ${res.lastName}`,
-          unitNumber: res.property?.unitNumber ?? "Unit",
-          block: res.property?.block ?? "",
-          phone: res.phone,
-        } : null,
-      },
-    };
-  }
-
-  return { valid: false, reason: "Code not recognized. Access denied.", gatePass: null };
+  return { valid: false, reason: "Code or QR not recognized. Access denied.", gatePass: null };
 }
 
 export async function confirmGateAccess(
@@ -435,9 +397,9 @@ export async function confirmGateAccess(
 }
 
 export async function revokePass(passId: string, revokerId: string) {
-  return prisma.visitorPass.update({
+  return prisma.gatePass.update({
     where: { id: passId },
-    data: { status: "REVOKED", revokedAt: new Date(), revokedById: revokerId },
+    data: { status: "CANCELLED" },
   });
 }
 
@@ -448,7 +410,7 @@ export async function currentlyInsideCounts() {
   return { visitors, dispatch, vehicles };
 }
 
-export async function toDate(v?: string | null): Promise<Date | undefined> {
+export function toDate(v?: string | null): Date | undefined {
   if (!v) return undefined;
   const d = new Date(v);
   return isNaN(d.getTime()) ? undefined : d;
