@@ -10,7 +10,5 @@
       "@prisma/client": ["./backend/node_modules/@prisma/client"]
     }
   },
-  "references": [
-    { "path": "./backend" }
-  ]
+  "exclude": ["node_modules", "backend/dist", ".next"]
 }
