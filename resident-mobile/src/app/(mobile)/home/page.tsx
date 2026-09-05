@@ -103,13 +103,44 @@ export default function ResidentHomePage() {
   async function sharePass(pass: GatePass) {
     const formatted = formatPassCode(pass.code);
     const target = pass.visitorName || "Guest";
-    const text = `Hi ${target}, your Silverland Estate gate access code is *${formatted}*. Please call out or show this code to the security officer at the main gate. Valid for 2 hours.`;
+    const remaining = getTimeRemaining(pass.expiresAt);
+    const passLabel =
+      pass.passType === "VISITOR"
+        ? `Visitor Pass (${pass.visitorType === "DELIVERY" ? "Dispatch / Delivery" : pass.visitorType === "SERVICE" ? "Technician" : pass.visitorType === "FAMILY" ? "Family" : "Guest"})`
+        : "Resident Gate Pass";
+    const purposeLine = pass.purpose ? `📋 *Purpose:* ${pass.purpose}` : "";
+    const vehicleLine = pass.vehiclePlate ? `🚘 *Vehicle:* ${pass.vehiclePlate}` : "";
+
+    const lines = [
+      `🏘️ *SILVERLAND ZONE — TEDO HOUSING ESTATE*`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      `Hi *${target}*, you have been granted gate access.`,
+      ``,
+      `🔑 *Your Access Code:*`,
+      `   📟  *${formatted}*`,
+      ``,
+      `📌 *Pass Type:* ${passLabel}`,
+      purposeLine,
+      vehicleLine,
+      `⏳ *Valid for:* ${remaining.text}`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `📍 *How to enter:*`,
+      `   1️⃣ Arrive at the main gate`,
+      `   2️⃣ Tell the security officer your code: *${formatted}*`,
+      `   3️⃣ Present a valid ID if requested`,
+      ``,
+      `⚠️ This code is single-use and expires after the time above. Do not share it with anyone else.`,
+      ``,
+      `_Powered by Silverland Estate Access Control_`,
+    ].filter(Boolean).join("\n");
 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Silverland Estate Gate Code",
-          text,
+          title: `Silverland Estate — Gate Access for ${target}`,
+          text: lines,
         });
         return;
       } catch {
@@ -117,7 +148,7 @@ export default function ResidentHomePage() {
       }
     }
 
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(lines);
     setCopiedId(pass.id);
     setTimeout(() => setCopiedId(null), 2500);
   }
