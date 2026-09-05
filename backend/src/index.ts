@@ -28,9 +28,10 @@ import resident from "./routes/resident";
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
 
-// Reflect the requesting origin (bearer-token auth, no cookies → CSRF-safe).
-// Optionally restrict later by setting CORS_ORIGINS to a comma-separated list.
-const origins =
+// CORS: reflect the request origin (bearer-token auth in headers, no cookies
+// => CSRF-safe). Allow all origins so any deployed frontend (admin/officer/
+// resident) can call this API. If you must restrict later, set CORS_ORIGINS.
+const origins: any =
   process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.trim()
     ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
     : true;
