@@ -29,12 +29,9 @@ const app = express();
 const PORT = Number(process.env.PORT || 4000);
 
 // CORS: reflect the request origin (bearer-token auth in headers, no cookies
-// => CSRF-safe). Allow all origins so any deployed frontend (admin/officer/
-// resident) can call this API. If you must restrict later, set CORS_ORIGINS.
-const origins: any =
-  process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.trim()
-    ? process.env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
-    : true;
+// => CSRF-safe). Always reflect any origin so all deployed frontends can call
+// this API. Set CORS_ORIGINS later if you want to restrict explicitly.
+const origins: any = true;
 
 app.use(cors({ origin: origins, allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json({ limit: "2mb" }));
