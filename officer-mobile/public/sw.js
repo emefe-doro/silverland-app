@@ -1,30 +1,26 @@
-/* Silverland Zone PWA service worker - basic offline strategy */
-const CACHE = "silverland-v1";
+/* Silverland Zone PWA service worker.
+   Network-first for navigations (HTML) so deploys are never stale;
+   cache-first for hashed static assets (immutable). */
+const VERSION = "silverland-v2"; // bump to invalidate old caches
 const PRECACHE = ["/", "/login"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting())
+    caches.open(VERSION).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-      )
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return; // never cache mutations
+  if (req.method !== "GET") return;
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
@@ -35,7 +31,7 @@ self.addEventListener("fetch", (event) => {
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(req, copy));
+          caches.open(VERSION).then((c) => c.put(req, copy));
           return res;
         })
         .catch(() => caches.match(req))
@@ -43,7 +39,21 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Assets / pages: cache-first.
+  // Navigations / HTML documents: always try the network (fresh), cache for offline.
+  if (req.mode === "navigate" || req.destination === "document") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(req, copy));
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Static assets (hashed chunks/images): cache-first.
   event.respondWith(
     caches.match(req).then(
       (cached) =>
@@ -51,7 +61,7 @@ self.addEventListener("fetch", (event) => {
         fetch(req).then((res) => {
           if (res.ok) {
             const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
+            caches.open(VERSION).then((c) => c.put(req, copy));
           }
           return res;
         })
